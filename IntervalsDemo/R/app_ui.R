@@ -5,7 +5,7 @@ app_ui <- function() {
     golem_add_external_resources(),
     # List the first level UI elements here 
     fluidPage(theme = shinythemes::shinytheme("united"), title = "Prediction and Confidence Intervals",
-              mod_create_intervals_ui("create_intervals_ui_1")
+              fluidRow(mod_create_intervals_ui("create_intervals_ui_1"))
     )
   )
 }
