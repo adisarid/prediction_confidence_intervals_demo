@@ -1,0 +1,215 @@
+# Module UI
+  
+#' @title   mod_create_intervals_ui and mod_create_intervals_server
+#' @description  A shiny Module.
+#'
+#' @param id shiny id
+#' @param input internal
+#' @param output internal
+#' @param session internal
+#'
+#' @rdname mod_create_intervals
+#'
+#' @keywords internal
+#' @export 
+#' @importFrom shiny NS tagList 
+mod_create_intervals_ui <- function(id){
+  ns <- NS(id)
+  sidebarLayout(
+    sidebarPanel(width = 3,
+      fluidRow(
+        selectInput(ns("functional_relationship"),
+                    label = "Choose type of relationship",
+                    choices = c("Linear: y = a + bx + eps" = "linear", 
+                                "Log-linear: log(y) = a + bx + eps" = "log_linear", 
+                                "Sine: y = a + b*sin(x) + eps" = "sine"))),
+      fluidRow(
+        numericInput(ns("select_a"),
+                  "Value of a:", 
+                  1),
+        numericInput(ns("select_b"),
+                  "Value of b:",
+                  0.5)
+      ),
+      fluidRow(
+        sliderInput(ns("x_range"),
+                    label = "Range of x",
+                    min = 0, max = 10, value = c(0, 1), step = 0.1, dragRange = T)
+      ),
+      fluidRow(
+        sliderInput(ns("sample_size"),
+                    label = "Select Sample Size",
+                    min = 10, max = 1000, value = 250, step = 10)
+      ),
+      fluidRow(
+        sliderInput(ns("epsilon_error"),
+                    label = "Define error sigma",
+                    min = 0, max = 10, value = 0.3, step = 0.1)
+      ),
+      fluidRow(
+        h3("Include on chart:"),
+        checkboxInput(ns("include_real_function"), 
+                      label = "Original Function", value = T),
+        checkboxInput(ns("include_geom_point"),
+                      label = "Points", value = F),
+        checkboxInput(ns("include_ci"),
+                      label = "Confidence interval", value = T),
+        checkboxInput(ns("include_pi"),
+                      label = "Prediction Interval", value = T),
+        checkboxInput(ns("include_fit"),
+                      label = "Model's fit", value = T)
+      )
+    ),
+    mainPanel(
+      DT::DTOutput(ns("debug_text")),
+      plotOutput(ns("result_plot"), height = "500px"),
+      shinydashboard::box(tagList(p("Solid black = real functional relationship"),
+                                  p("Dashed blue = confidence intervals"),
+                                  p("Dashed red = prediction interval"),
+                                  p("Solid brown = model fit"),
+                                  p("Points = randomized sample")), 
+                          title = "Chart legend")
+    )
+  )
+}
+    
+# Module Server
+    
+#' @rdname mod_create_intervals
+#' @export
+#' @keywords internal
+    
+mod_create_intervals_server <- function(input, output, session){
+  ns <- session$ns
+  
+  # randomize noise ----
+  eps_noise <- reactive({
+    rnorm(n = input$sample_size, sd = input$epsilon_error)
+  })
+  
+
+  # generate real relationship ----
+  real_functional_relationship <- reactive({
+    x_tib <- tibble::tibble(x = seq(from = input$x_range[1], 
+                                    to = input$x_range[2], 
+                                    by = 0.05))
+    if (input$functional_relationship == "linear"){
+      x_tib %>%
+        mutate(y_values_actual = x*input$select_b + input$select_a)
+    } else if (input$functional_relationship == "log_linear"){
+      x_tib %>%
+        mutate(y_values_actual = exp(x*input$select_b + input$select_a))
+      } else {
+      x_tib %>%
+        mutate(y_values_actual = sin(x)*input$select_b + input$select_a)
+    }
+  })
+  
+  # generate sample ----
+  sample_tibble <- reactive({
+    x_tib <- tibble(x = runif(n = input$sample_size, 
+                              min = input$x_range[1],
+                              max = input$x_range[2]
+                              ))
+    if (input$functional_relationship == "linear"){
+      x_tib %>%
+        mutate(y_randomized = x*input$select_b + input$select_a + eps_noise())
+    } else if (input$functional_relationship == "log_linear"){
+      x_tib %>%
+        mutate(y_randomized = exp(x*input$select_b + input$select_a + eps_noise()))
+    } else {
+      x_tib %>%
+        mutate(y_randomized = sin(x)*input$select_b + input$select_a + eps_noise())
+    }
+  })
+  
+  linear_model_predictions <- reactive({
+    if (input$functional_relationship == "linear"){
+      linear_model <- lm(y_randomized ~ x, data = sample_tibble())
+    } else if (input$functional_relationship == "log_linear"){
+      linear_model <- lm(log(y_randomized) ~ x, data = sample_tibble())
+    } else {
+      linear_model <- lm(y_randomized ~ sin(x), data = sample_tibble())
+    }
+    confidence_interval <- predict(linear_model, interval = "confidence",
+                                   newdata = real_functional_relationship()) %>% 
+      tibble::as_tibble() %>% 
+      select(fit, lwr, upr) %>% 
+      rename_at(vars(2:3), ~paste0("ci_",.))
+    
+    prediction_interval <- predict(linear_model, interval = "prediction",
+                                   newdata = real_functional_relationship()) %>% 
+      tibble::as_tibble() %>% 
+      select(lwr, upr) %>% 
+      rename_at(vars(1:2), ~paste0("pi_",.))
+    
+    prepped_tibble <- real_functional_relationship() %>% 
+      bind_cols(confidence_interval,
+                prediction_interval)
+    
+    if (input$functional_relationship == "log_linear"){
+      prepped_tibble <- prepped_tibble %>% 
+        mutate_at(vars(ci_lwr, ci_upr, pi_lwr, pi_upr, fit), exp)
+    }
+    
+    prepped_tibble
+    
+  })
+  
+  # output$debug_text <- DT::renderDT({
+  #   DT::datatable(linear_model_predictions())
+  # })
+  
+  output$result_plot <- renderPlot({
+    
+    final_plot <- ggplot()
+    
+    if (input$include_real_function){
+      final_plot <- final_plot + 
+        geom_line(data = linear_model_predictions(),
+                  aes(x = x, y = y_values_actual), color = "black", inherit.aes = F, size = 1.5)
+    }
+    
+    if (input$include_geom_point){
+      final_plot <- final_plot + 
+        geom_point(data = sample_tibble(),
+                   aes(x = x, y = y_randomized), alpha = 0.5, inherit.aes = F)
+    }
+    
+    if (input$include_ci){
+      final_plot <- final_plot + 
+        geom_line(data = linear_model_predictions(),
+                  aes(x = x, y = ci_lwr), inherit.aes = F, color = "blue", linetype = 2, size = 1) + 
+        geom_line(data = linear_model_predictions(),
+                  aes(x = x, y = ci_upr), inherit.aes = F, color = "blue", linetype = 2, size = 1)
+    }
+    
+    if (input$include_pi){
+      final_plot <- final_plot + 
+        geom_line(data = linear_model_predictions(),
+                  aes(x = x, y = pi_lwr), inherit.aes = F, color = "red", linetype = 2, size = 1) + 
+        geom_line(data = linear_model_predictions(),
+                  aes(x = x, y = pi_upr), inherit.aes = F, color = "red", linetype = 2, size = 1)
+    }
+    
+    if (input$include_fit){
+      final_plot <- final_plot + 
+        geom_line(data = linear_model_predictions(),
+                  aes(x = x, y = fit), inherit.aes = F, color = "brown", size = 1)
+    }
+    
+    final_plot + 
+      theme_bw() + 
+      xlab("x") + 
+      ylab("y")
+    
+  })
+  
+}
+    
+## To be copied in the UI
+# mod_create_intervals_ui("create_intervals_ui_1")
+    
+## To be copied in the server
+# callModule(mod_create_intervals_server, "create_intervals_ui_1")
+ 

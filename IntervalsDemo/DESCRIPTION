@@ -1,0 +1,28 @@
+Package: IntervalsDemo
+Title: Prediction and confidence intervals
+Version: 0.0.0.9000
+Authors@R: person('Adi', 'Sarid', email = 'adi@sarid-ins.co.il', role = c('cre', 'aut'))
+Description: A demonstration app for prediction and confidence intervals.
+License: What license is it under?
+Encoding: UTF-8
+LazyData: true
+Imports: 
+    shiny,
+    golem,
+    processx,
+    attempt,
+    DT,
+    glue,
+    htmltools,
+    dplyr,
+    tidyr,
+    pkgload,
+    shinythemes,
+    tibble,
+    shinydashboard,
+    ggplot2
+RoxygenNote: 6.1.1
+URL: https://github.com/adisarid/prediction_confidence_intervals_demo
+BugReports: https://github.com/adisarid/prediction_confidence_intervals_demo/issues
+Suggests: 
+    testthat
